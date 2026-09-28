@@ -1,10 +1,10 @@
 """Optional MedicalNet adapters used by training and competition tasks.
 
 MedicalNet is kept as an optional dependency because the competition image and
-weight packages are usually mounted separately.  The adapter imports the
-MedicalNet ``models.resnet.generate_model`` factory only when requested and
-accepts both a raw state dict and the common ``{"state_dict": ...}`` checkpoint
-format.  It never downloads weights.
+weight packages are usually mounted separately.  The adapter accepts both the
+official ``models.resnet.resnet50`` API and classifier-style forks, and accepts
+raw state dicts plus common ``{"state_dict": ...}`` checkpoint formats.  It
+never downloads weights.
 """
 
 from __future__ import annotations
@@ -152,19 +152,24 @@ class MedicalNet3DClassifier(nn.Module):
         strict: bool = False,
     ) -> None:
         super().__init__()
-        self.backbone, self._api = _medicalnet_factory(
+        backbone, self._api = _medicalnet_factory(
             depth, in_channels=in_channels, num_classes=num_classes
         )
         self.checkpoint_report: dict[str, Any] = {}
         if checkpoint:
             self.checkpoint_report = _load_compatible(
-                self.backbone, checkpoint, strict=strict
+                backbone, checkpoint, strict=strict
             )
+        if self._api == "official_api":
+            self.encoder = _OfficialMedicalNetFeatures(backbone)
+            self.classifier = nn.Linear(self.encoder.feature_dim, num_classes)
+        else:
+            self.backbone = backbone
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self._api == "official_api":
+            return self.classifier(self.encoder(x))
         output = self.backbone(x)
-        if output.ndim > 2:
-            output = output.flatten(2).mean(dim=2)
         if output.ndim == 1:
             output = output.unsqueeze(0)
         return output
