@@ -178,7 +178,6 @@ class StudyNiftiDataset(Dataset):
             "AccessionNumber": record.accession,
             "label": "" if record.label is None else record.label,
             "modality_present": torch.tensor(present, dtype=torch.float32),
-            "modality_paths": record.modalities,
         }
         if self.task == "segmentation":
             if record.core_mask:

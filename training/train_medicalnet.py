@@ -24,7 +24,9 @@ def auc(labels, scores):
     s = np.asarray(scores, dtype=float)
     if y.size == 0 or np.unique(y).size < 2:
         return None
-    order = np.argsort(-s, kind="mergesort")
+    # Rank positives in ascending score order; the rank-sum formula below
+    # otherwise reports 1 - ROC-AUC when scores are sorted descending.
+    order = np.argsort(s, kind="mergesort")
     y = y[order]
     positives = y.sum()
     negatives = y.size - positives

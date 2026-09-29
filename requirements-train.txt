@@ -1,0 +1,8 @@
+-r requirements.txt
+# The competition documents do not pin a PyTorch version. This range is only
+# for the local trainable smoke baseline; in the platform container prefer the
+# preinstalled approved PyTorch/CUDA combination.
+torch>=2.2,<3
+pandas>=2.2,<3
+scipy>=1.10,<2
+# nnunetv2>=2.5  # install when training the nnUNet segmentation targets
