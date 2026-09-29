@@ -115,6 +115,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--file-index", type=Path, required=True); parser.add_argument("--labels-csv", type=Path, required=True)
     parser.add_argument("--medicalnet-checkpoint", type=Path, default=None)
+    parser.add_argument("--resume", type=Path, default=None)
     parser.add_argument("--epochs", type=int, default=40); parser.add_argument("--batch-size", type=int, default=2); parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--target-shape", nargs=3, type=int, default=(32, 32, 16)); parser.add_argument("--val-fraction", type=float, default=0.2); parser.add_argument("--test-fraction", type=float, default=0.1); parser.add_argument("--patience", type=int, default=8); parser.add_argument("--lr", type=float, default=1e-4); parser.add_argument("--seed", type=int, default=42); parser.add_argument("--output", type=Path, default=Path("checkpoint_goal4"))
     args = parser.parse_args(); random.seed(args.seed); np.random.seed(args.seed); torch.manual_seed(args.seed)
@@ -132,8 +133,18 @@ def main():
     args.output.mkdir(parents=True, exist_ok=True); shape = tuple(args.target_shape)
     loaders = {s: DataLoader(Goal4Dataset(rows, labels, s, shape), batch_size=args.batch_size, shuffle=s == "train", num_workers=args.num_workers) for s in ("train", "val", "test")}
     if not len(loaders["train"].dataset) or not len(loaders["val"].dataset): raise RuntimeError("train/val split is empty")
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu"); model = Goal4MedicalNet(checkpoint=args.medicalnet_checkpoint).to(device); optimizer = AdamW(model.parameters(), lr=args.lr); best = float("inf"); stale = 0; history = []
-    for epoch in range(1, args.epochs + 1):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu"); model = Goal4MedicalNet(checkpoint=args.medicalnet_checkpoint).to(device); optimizer = AdamW(model.parameters(), lr=args.lr); best = float("inf"); stale = 0; history = []; start_epoch = 1
+    if args.resume:
+        payload = torch.load(args.resume, map_location=device)
+        model.load_state_dict(payload.get("model", payload))
+        if payload.get("optimizer"):
+            optimizer.load_state_dict(payload["optimizer"])
+        start_epoch = int(payload.get("epoch", 0)) + 1
+        best = float(payload.get("best", best))
+        stale = int(payload.get("stale", 0))
+        history = list(payload.get("history", []))
+        print(json.dumps({"resumed_from": str(args.resume), "start_epoch": start_epoch}), flush=True)
+    for epoch in range(start_epoch, args.epochs + 1):
         model.train(); running = 0.0
         for batch in loaders["train"]:
             optimizer.zero_grad(set_to_none=True); loss, _ = loss_and_metrics(model(batch["image"].to(device)), batch["targets"].to(device)); loss.backward(); optimizer.step(); running += float(loss.item())
@@ -141,10 +152,11 @@ def main():
         with torch.inference_mode():
             for batch in loaders["val"]: val_loss += float(loss_and_metrics(model(batch["image"].to(device)), batch["targets"].to(device))[0].item())
         val_loss /= max(len(loaders["val"]), 1); row = {"epoch": epoch, "train_loss": running / max(len(loaders["train"]), 1), "val_loss": val_loss}; history.append(row); print(json.dumps(row), flush=True)
-        if val_loss < best - 1e-4: best = val_loss; stale = 0; torch.save({"model": model.state_dict(), "backend": "medicalnet", "in_channels": 1}, args.output / "best.pt")
+        if val_loss < best - 1e-4: best = val_loss; stale = 0; torch.save({"model": model.state_dict(), "backend": "medicalnet", "in_channels": 1, "epoch": epoch}, args.output / "best.pt")
         else:
             stale += 1
-            if stale >= args.patience: break
+        torch.save({"model": model.state_dict(), "optimizer": optimizer.state_dict(), "backend": "medicalnet", "in_channels": 1, "epoch": epoch, "best": best, "stale": stale, "history": history}, args.output / "last.pt")
+        if stale >= args.patience: break
     (args.output / "summary.json").write_text(json.dumps({"sequences": len(rows), "cases": len(accessions), "history": history, "best_val_loss": best}, indent=2), encoding="utf-8")
 
 

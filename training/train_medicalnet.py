@@ -61,6 +61,7 @@ def main():
     parser.add_argument("--labels-csv", type=Path, required=True)
     parser.add_argument("--label-column", default="check__glioma_with_label__std")
     parser.add_argument("--medicalnet-checkpoint", type=Path, default=None)
+    parser.add_argument("--resume", type=Path, default=None)
     parser.add_argument("--epochs", type=int, default=40)
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--num-workers", type=int, default=0)
@@ -91,8 +92,19 @@ def main():
     model = MedicalNet3DClassifier(depth=50, in_channels=1, num_classes=1, checkpoint=args.medicalnet_checkpoint).to(device)
     optimizer = AdamW(model.parameters(), lr=args.lr)
     criterion = BCEWithLogitsLoss()
-    best = -float("inf"); stale = 0; best_epoch = 0; history = []
-    for epoch in range(1, args.epochs + 1):
+    best = -float("inf"); stale = 0; best_epoch = 0; history = []; start_epoch = 1
+    if args.resume:
+        payload = torch.load(args.resume, map_location=device)
+        model.load_state_dict(payload.get("model", payload))
+        if payload.get("optimizer"):
+            optimizer.load_state_dict(payload["optimizer"])
+        start_epoch = int(payload.get("epoch", 0)) + 1
+        best = float(payload.get("best", best))
+        best_epoch = int(payload.get("best_epoch", 0))
+        stale = int(payload.get("stale", 0))
+        history = list(payload.get("history", []))
+        print(json.dumps({"resumed_from": str(args.resume), "start_epoch": start_epoch}, ensure_ascii=False), flush=True)
+    for epoch in range(start_epoch, args.epochs + 1):
         model.train(); running = 0.0; seen = 0
         for batch in train_loader:
             x, y = batch["image"].to(device), batch["label"].to(device)
@@ -107,11 +119,12 @@ def main():
         score = -float("inf") if score is None else float(score)
         if score > best + 1e-4:
             best, best_epoch, stale = score, epoch, 0
-            torch.save({"model": model.state_dict(), "backend": "medicalnet", "in_channels": 1, "aggregation": "case_max"}, args.output / "best.pt")
+            torch.save({"model": model.state_dict(), "backend": "medicalnet", "in_channels": 1, "aggregation": "case_max", "epoch": epoch}, args.output / "best.pt")
         else:
             stale += 1
-            if stale >= args.patience:
-                break
+        torch.save({"model": model.state_dict(), "optimizer": optimizer.state_dict(), "backend": "medicalnet", "in_channels": 1, "aggregation": "case_max", "epoch": epoch, "best": best, "best_epoch": best_epoch, "stale": stale, "history": history}, args.output / "last.pt")
+        if stale >= args.patience:
+            break
 
     if (args.output / "best.pt").is_file():
         model.load_state_dict(torch.load(args.output / "best.pt", map_location=device)["model"])
