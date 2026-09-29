@@ -55,7 +55,13 @@ def norm(value: str) -> str:
 def encode(head: str, value: str) -> int:
     if not value or value.lower() in {"na", "unk", "unknown", "none", "nan"}: return -1
     kind = HEADS[head][1]
-    if kind == "bin": return 1 if value.lower() in {"1", "true", "yes", "有", "是"} else 0
+    if kind == "bin":
+        value_norm = norm(value)
+        if value_norm in {"1", "true", "yes", "有", "是", "有清", "clear", "present"}:
+            return 1
+        if value_norm in {"0", "false", "no", "无", "否", "无清", "unclear", "absent"}:
+            return 0
+        return -1
     if head == "location":
         if value in LOCATION_ZH: return LOCATION_ZH[value]
         choices = LOCATION
