@@ -59,11 +59,6 @@ def _medicalnet_factory(depth: int, *, in_channels: int, num_classes: int) -> tu
                 return model, "classifier_api"
             factory = getattr(module, f"resnet{depth}", None)
             if factory is not None:
-                if in_channels != 1:
-                    raise ValueError(
-                        "The official MedicalNet ResNet implementation has a fixed "
-                        "single-channel input; use in_channels=1."
-                    )
                 model = factory(
                     sample_input_W=32,
                     sample_input_H=32,
@@ -161,6 +156,7 @@ class MedicalNet3DClassifier(nn.Module):
                 backbone, checkpoint, strict=strict
             )
         if self._api == "official_api":
+            self.input_adapter = nn.Identity() if in_channels == 1 else nn.Conv3d(in_channels, 1, 1)
             self.encoder = _OfficialMedicalNetFeatures(backbone)
             self.classifier = nn.Linear(self.encoder.feature_dim, num_classes)
         else:
@@ -168,7 +164,7 @@ class MedicalNet3DClassifier(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self._api == "official_api":
-            return self.classifier(self.encoder(x))
+            return self.classifier(self.encoder(self.input_adapter(x)))
         output = self.backbone(x)
         if output.ndim == 1:
             output = output.unsqueeze(0)
@@ -196,6 +192,7 @@ class MedicalNet3DEncoder(nn.Module):
                 self.backbone, checkpoint, strict=strict
             )
         if api == "official_api":
+            self.input_adapter = nn.Identity() if in_channels == 1 else nn.Conv3d(in_channels, 1, 1)
             self.encoder = _OfficialMedicalNetFeatures(self.backbone)
             self.feature_dim = self.encoder.feature_dim
         else:
@@ -207,7 +204,7 @@ class MedicalNet3DEncoder(nn.Module):
             self.encoder = self.backbone
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.encoder(x).reshape(x.shape[0], -1)
+        return self.encoder(self.input_adapter(x)).reshape(x.shape[0], -1)
 
 
 __all__ = ["MedicalNet3DClassifier", "MedicalNet3DEncoder"]
