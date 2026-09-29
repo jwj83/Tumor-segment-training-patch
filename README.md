@@ -19,3 +19,11 @@ Example optional arguments:
 --lr 1e-4
 --patience 12
 ```
+
+
+Goal5 nnUNet training is provided by:
+
+- `scripts/export_goal5_nnunet.py`: creates geometry-consistent four-channel datasets for the core and abnormal targets, resampling each case to its T1CE or FLAIR/T2 reference grid.
+- `scripts/train_goal5_nnunet.sh`: plans, verifies, preprocesses, and trains the two nnUNet datasets.
+
+Run it from the training repository after setting `nnUNet_raw`, `nnUNet_preprocessed`, and `nnUNet_results`.
