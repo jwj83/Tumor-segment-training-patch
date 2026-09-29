@@ -7,6 +7,7 @@ import argparse
 import csv
 import json
 import random
+import re
 from pathlib import Path
 
 import nibabel as nib
@@ -31,6 +32,7 @@ HEADS = {
 }
 LOCATION = ("Brainstem", "RightParietal", "RightFrontal", "RightBasalGanglia", "RightTemporal", "RightCerebellar", "RightOccipital", "LeftParietal", "LeftFrontal", "LeftBasalGanglia", "LeftTemporal", "LeftCerebellar", "LeftOccipital", "Other", "Unknown")
 MORPH = ("Regular", "Irregular"); WHO = ("1", "2", "3", "4"); PATTERN = ("None", "Ring", "RimEnhancing", "Nodular", "GroundGlass", "Gyriform", "Multifocal", "Other"); SIGNAL = ("Low", "Iso", "High")
+LOCATION_ZH = {"脑干": 0, "右侧顶叶": 1, "右侧额叶": 2, "右侧基底节区": 3, "右侧颞叶": 4, "右侧小脑半球": 5, "右侧枕叶": 6, "左侧顶叶": 7, "左侧额叶": 8, "左侧基底节区": 9, "左侧颞叶": 10, "左侧小脑半球": 11, "左侧枕叶": 12, "其他": 13, "NA/UNK": 14, "未知": 14}
 
 
 def read_csv(path: Path):
@@ -46,7 +48,14 @@ def encode(head: str, value: str) -> int:
     if not value or value.lower() in {"na", "unk", "unknown", "none", "nan"}: return -1
     kind = HEADS[head][1]
     if kind == "bin": return 1 if value.lower() in {"1", "true", "yes", "有", "是"} else 0
-    choices = LOCATION if head == "location" else MORPH if head == "morphology" else WHO if head == "who_grade" else PATTERN if head == "enhancement_pattern" else SIGNAL
+    if head == "location":
+        if value in LOCATION_ZH: return LOCATION_ZH[value]
+        choices = LOCATION
+    elif head == "who_grade":
+        match = re.search(r"([1-4])", value)
+        return int(match.group(1)) - 1 if match else -1
+    else:
+        choices = MORPH if head == "morphology" else PATTERN if head == "enhancement_pattern" else SIGNAL
     aliases = {norm(item): i for i, item in enumerate(choices)}
     aliases.update({"regular": 0, "规则": 0, "irregular": 1, "不规则": 1, "high": 2, "高": 2, "low": 0, "低": 0, "iso": 1, "等": 1, "ring": 1, "环形": 1, "rimenhancement": 2, "花环状": 2, "nodular": 3, "结节状": 3, "multifocal": 6, "多灶状": 6})
     return aliases.get(norm(value), -1)
