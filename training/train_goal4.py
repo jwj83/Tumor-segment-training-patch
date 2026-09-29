@@ -40,6 +40,14 @@ def read_csv(path: Path):
         return [{k: (v or "").strip() for k, v in row.items()} for row in csv.DictReader(handle)]
 
 
+def label_value(row: dict[str, str], column: str) -> str:
+    """Use a standardized column when present, otherwise its raw source field."""
+    value = row.get(column, "")
+    if not value and column.endswith("__std"):
+        value = row.get(column[:-5], "")
+    return value
+
+
 def norm(value: str) -> str:
     return "".join(str(value).lower().split()).replace("_", "")
 
@@ -111,7 +119,7 @@ def main():
     label_rows = read_csv(args.labels_csv); labels = {}
     for row in label_rows:
         accession = row.get("AccessionNumber", "")
-        if accession and accession not in labels: labels[accession] = [encode(head, row.get(column, "")) for head, (column, _) in HEADS.items()]
+        if accession and accession not in labels: labels[accession] = [encode(head, label_value(row, column)) for head, (column, _) in HEADS.items()]
     records = build_study_records(args.file_index, args.labels_csv, require_all_modalities=False)
     records = [r for r in records if r.accession in labels]
     train_records, val_records, test_records, split_map = split_records(records, args.val_fraction, args.test_fraction, args.seed)
