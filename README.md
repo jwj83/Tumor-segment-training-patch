@@ -129,3 +129,60 @@ precache + 3-epoch train_medicalnet run, with and without --cache-dir   OK
 
 That is a correctness smoke test only. The timings quoted above are extrapolated
 from per-volume measurements, not measured on the competition hardware.
+
+## Goal5 rewrite
+
+Two targets only, matching the spec's "输出文件 / 体素值定义 / 对应任务" table:
+
+```text
+核心区 nifti      0/1   任务A：T1增强核心区分割      肿瘤瘤体 drawn on T1CE
+周围异常区 nifti   0/1   任务B：Flair/T2总异常区分割   瘤体 ∪ 水肿 ∪ 全肿瘤 on FLAIR, else T2
+```
+
+`异常信号` (infarction and other non-tumour findings) is a RoiName in the
+annotation table but not a segmentation output, so studies whose only mask is
+`异常信号` are skipped.
+
+What changed in `scripts/export_goal5_nnunet.py`:
+
+- **Task B is a union.** The protocol lets an annotator draw 瘤体 and 水肿
+  separately *or* merge them into one 全肿瘤 when they cannot be told apart.
+  Picking one file by priority made those two conventions disagree: a study
+  with both files kept only 水肿 and so taught the model that the tumour body
+  is not part of the *total* abnormality.
+- **Multifocal lesions keep every component.** Masks are stored as
+  `水肿_1_mask.nii.gz`, `水肿_2_mask.nii.gz`, ...; only the first was read.
+- **The reference grid is the series the mask was drawn on.** When FLAIR exists
+  but the annotation lives on T2, the old code resampled the label onto the
+  FLAIR grid, interpolating it and clipping whatever fell outside FLAIR's FOV.
+- **Every axis is floored at `--min-spacing` (1.5 mm) and never upsampled.** A
+  0.45x0.45x6 mm axial series drops 11x in voxels; a 1 mm isotropic 3-D series
+  drops 3.4x. True isotropic resampling would instead interpolate 6 mm slices
+  up to 1.5 mm and make the volume larger.
+- Cases are keyed by AccessionNumber and skipped when complete, so an
+  interrupted export resumes instead of renumbering and orphaning cases.
+- Cases whose mask is empty after resampling, and series that are not 3-D, are
+  skipped and listed in `skipped.json`.
+- Explicit `set_data_dtype` (float32 images, uint8 labels) instead of
+  inheriting the reference header's int16.
+
+`scripts/train_goal5_nnunet.sh` is now three resumable stages:
+
+```bash
+bash scripts/train_goal5_nnunet.sh export
+bash scripts/train_goal5_nnunet.sh preprocess
+bash scripts/train_goal5_nnunet.sh train
+```
+
+- `nnUNetv2_plan_and_preprocess -c 3d_fullres`. The default is
+  `['2d', '3d_fullres', '3d_lowres']`, so the old script preprocessed and stored
+  the dataset three times and trained on one of them.
+- `-np 2 -npfp 2` (env `NNUNET_NP` / `NNUNET_NPFP`). Each worker holds a whole
+  four-channel case; the default of 4 is what ran the box out of memory.
+- Preprocessing skips a dataset that already has data for the configuration.
+- Both trainings run concurrently with `--c`, so a dropped session resumes from
+  `checkpoint_latest.pth` rather than restarting the pipeline at the export.
+- `--npz` dropped: it stores validation softmax maps, which are only needed for
+  ensembling across folds.
+- `NNUNET_TRAINER` defaults to `nnUNetTrainer_100epochs` (the nnUNet default is
+  1000, roughly 12 h per model here).
